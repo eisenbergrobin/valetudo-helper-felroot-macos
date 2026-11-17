@@ -13,6 +13,34 @@ SRC="$ROOT/src/main.c"
 LIBUSB="$ROOT/third_party/libusb"
 OUT="$ROOT/build"
 
+# The release binaries are static Linux executables, so there is nothing to run on macOS.
+# Build a native one there instead, against libusb from Homebrew. No zig needed.
+if [ "$(uname -s)" = "Darwin" ]; then
+    cflags=""
+    libs=""
+    if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libusb-1.0; then
+        cflags="$(pkg-config --cflags libusb-1.0)"
+        libs="$(pkg-config --libs libusb-1.0)"
+    else
+        for p in "${LIBUSB_PREFIX:-}" /opt/homebrew /usr/local; do
+            if [ -f "$p/include/libusb-1.0/libusb.h" ]; then
+                cflags="-I$p/include/libusb-1.0"
+                libs="-L$p/lib -lusb-1.0"
+                break
+            fi
+        done
+    fi
+    [ -n "$libs" ] || { echo "libusb not found - install it with: brew install libusb pkg-config"; exit 1; }
+
+    mkdir -p "$OUT"
+    echo "==> building for macOS/$(uname -m) -> $OUT/valetudo-helper-felroot-macos"
+    # cflags/libs are unquoted on purpose: they are whitespace separated flag lists
+    "${CC:-cc}" -O2 -Wall -o "$OUT/valetudo-helper-felroot-macos" "$SRC" \
+        $cflags $libs -framework IOKit -framework CoreFoundation
+    if command -v codesign >/dev/null 2>&1; then codesign --force --sign - "$OUT/valetudo-helper-felroot-macos"; fi
+    exit 0
+fi
+
 command -v zig >/dev/null || { echo "zig not found on PATH"; exit 1; }
 
 LIBUSB_SRCS=(

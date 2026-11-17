@@ -123,9 +123,17 @@ static inline void put_le32(uint8_t *p, uint32_t v)
 	p[3] = (uint8_t)((v >> 24) & 0xff);
 }
 
+/* macOS (IOKit) fails bulk transfers larger than this to the gadget, while Linux carries
+ * 128 KiB happily. This only decides how the stream is chopped up, not the bytes sent. */
+#ifdef __APPLE__
+#define USB_CHUNK (64 * 1024)
+#else
+#define USB_CHUNK (128 * 1024)
+#endif
+
 static void usb_bulk_send(libusb_device_handle *hdl, int ep, const uint8_t *buf, size_t len)
 {
-	const size_t max_chunk = 128 * 1024;
+	const size_t max_chunk = USB_CHUNK;
 	while (len > 0) {
 		size_t chunk = len < max_chunk ? len : max_chunk;
 		int bytes = 0;
@@ -286,6 +294,13 @@ static int usb_claim_and_find_eps(libusb_device_handle *hdl, uint8_t *epin, uint
 
 	if (libusb_kernel_driver_active(hdl, 0))
 		libusb_detach_kernel_driver(hdl, 0);
+
+	/* macOS leaves this vendor specific (0xff/0x42/0x03) gadget unconfigured, so the
+	 * interface cannot be claimed before configuration 1 is selected. No-op elsewhere. */
+	int cur_config = 0;
+	if (libusb_get_configuration(hdl, &cur_config) == 0 && cur_config != 1)
+		libusb_set_configuration(hdl, 1);
+
 	if (libusb_claim_interface(hdl, 0) != 0)
 		return -1;
 
@@ -1092,7 +1107,7 @@ static int fb_get_samples(struct fb_ctx_t *ctx, const char *path)
 	progress_start(&p, total);
 	uint64_t remaining = total;
 	while (remaining > 0) {
-		uint8_t chunk[128 * 1024];
+		uint8_t chunk[USB_CHUNK];
 		size_t want = remaining < sizeof(chunk) ? (size_t)remaining : sizeof(chunk);
 		int n = fb_raw_recv(ctx, chunk, want);
 		if (n <= 0) {

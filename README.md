@@ -1,41 +1,71 @@
-# valetudo-helper-felroot
+# valetudo-helper-felroot — macOS (Apple Silicon) build
 
-Asking people to compile a specifically patched version of sunxi-tools/xfel/etc. would be an exercise in futility.
+> **Disclaimer.** This macOS build is entirely vibecoded and has not been tested broadly.
+> It has so far been used successfully on exactly one robot: a MOVA V50 Ultra, rooted with
+> the fastboot method. Nothing else has been tested - other robot models, other robots,
+> other code paths, other macOS versions. Rooting writes to your robot's flash and can
+> brick it or void your warranty. Use it at your own risk.
 
-Therefore:
+Fork of [Hypfer/valetudo-helper-felroot](https://github.com/Hypfer/valetudo-helper-felroot)
+with a **vibecoded macOS (Apple Silicon) build** added. The upstream release binaries are
+static Linux executables and cannot run on macOS at all - that is not an amd64/arm64
+detail, there is no macOS build to download.
 
-`valetudo-helper-felroot` is a statically linked single binary tool that contains just enough FEL to do what is needed to root robots.
+Everything else is upstream's code. `src/main.c` differs by two pieces of platform
+plumbing: selecting the USB device configuration explicitly, and a smaller bulk transfer
+size. No binaries are published here - you build it in four commands below.
 
-For usage, simply download the latest binary from the releases section and execute it in a root shell on your linux laptop.<br/>
-For usage instructions, see the rooting guides on https://valetudo.cloud
+The actual rooting procedure, and which recon package your robot needs, is in the Valetudo
+guide: https://valetudo.cloud/pages/installation/dreame/
 
-## Credits
+## Build
 
-It should go without saying that my GPU did this, which makes for better C code than I could ever write.
+```sh
+git clone https://github.com/eisenbergrobin/valetudo-helper-felroot-macos.git
+cd valetudo-helper-felroot
+brew install libusb pkg-config
+./build.sh
+```
 
-If you should feel bad about that: Don't.<br/>
-GPUs have no soul.
+That leaves a working binary at `build/valetudo-helper-felroot-macos`. No `sudo`, no zig.
 
-Just like the C-Level of the corps building them.
+## Use
 
-<br/>
-<br/>
+Unpack the recon package for your robot - the guide links the correct one per model, for
+the MOVA V50 Ultra it is the URL below - and run the guide's commands with this binary.
+These lines continue from the build above:
 
-This project is just https://github.com/xboot/xfel cut down to what is required to do the thing.<br/>
-xfel is licensed under MIT.
+```sh
+cd ..
+curl -L -o dust-fel-recon-r2582.tar.gz https://fab.valetudo.cloud/robot/mova/r2582/fel/recon
+mkdir -p dust-fel-recon-r2582
+tar xzf dust-fel-recon-r2582.tar.gz -C dust-fel-recon-r2582
+cp valetudo-helper-felroot/build/valetudo-helper-felroot-macos dust-fel-recon-r2582/
+cd dust-fel-recon-r2582
 
-The sparse download/flash pipeline in src/main.c is a C port of the resparse logic
-from Android platform_system_core (fastboot.cpp, libsparse), licensed under BSD and Apache-2.0.<br/>
-See THIRD_PARTY_NOTICES for details.
+# the package also carries valetudo-helper-felroot-amd64: that is the Linux build, ignore it
+# put the robot in FEL mode first, as described in the guide
+./valetudo-helper-felroot-macos boot fsbl.bin payload.bin
+./valetudo-helper-felroot-macos getvar config
+./valetudo-helper-felroot-macos oem stage0
+./valetudo-helper-felroot-macos get_samples ./dustx100.bin
+```
 
-Additionally, the project vendors some version of libusb the LLM (likely wrongfully) thought would be the right choice.<br/>
-libusb is licensed under the LGPL-2.1.
+Then the sample/upload stage, then `oem dust <checkvalue>`, `oem prep`,
+`flash <partition> <image>` and `reboot` - in the order the guide gives, with the partition
+names and image files from the tarball the builder returns.
 
-## Valetudo helpers
+## Credits and license
 
-Valetudo helpers are a series of small standalone self-contained single-purpose single-file tools built to make
-usage and/or installation of Valetudo a bit easier.
+All of it is upstream's work: https://github.com/Hypfer/valetudo-helper-felroot, which is
+https://github.com/xboot/xfel cut down to what is needed, plus a C port of Android's
+resparse logic, plus vendored libusb. Licensing of those three is in THIRD_PARTY_NOTICES.
+The macOS build added here is community code and is not part of upstream.
 
-As with everything Valetudo, some intermediate computer skills are required. You should know what a network is,
-what HTTP is, how a terminal works and that kind of stuff.
-Please understand that it's not feasible for this or any open source project to provide basic computer lessons.
+## Notes
+
+- Not part of upstream's release pipeline. The Linux binary is the reference implementation.
+- The binary links libusb from Homebrew dynamically, so it runs on the Mac it was built
+  on, not on a Mac without libusb installed.
+- Up to `oem prep` / `flash` nothing is written to the robot's flash; FEL lives in the SoC
+  boot ROM, so a failed attempt before that point is recoverable.
